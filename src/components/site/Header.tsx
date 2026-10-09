@@ -1,3 +1,6 @@
+import { Button } from "@/components/ui/button";
+import { useAccount, signOutAccount } from "@/lib/account";
+import { useQueryClient } from "@tanstack/react-query";
 import { MyAvatar } from "@/components/site/MyAvatar";
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
 import { MapPin, Menu, X, ArrowLeft, CalendarDays, Newspaper, Volleyball, Palette, Gamepad2, Users, User, Info } from "lucide-react";
@@ -40,6 +43,8 @@ let hintShownThisLoad = false;
 
 export function Header() {
   const router = useRouter();
+  const account = useAccount();
+  const queryClient = useQueryClient();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const onHero = pathname === "/";
   const onExplore = pathname === "/explore";
@@ -201,6 +206,7 @@ export function Header() {
             >
               List an event
             </Link>
+            {account.user ? <Button variant="ghost" size="sm" onClick={async () => { await signOutAccount(queryClient); await router.navigate({ to: "/login", replace: true }); }}>Log out</Button> : <Button asChild variant="ghost" size="sm"><Link to="/login">Log in</Link></Button>}
             <button ref={menuButtonRef} aria-label="Menu" aria-expanded={open} onClick={() => setOpen((o) => !o)} className="grid h-11 w-11 place-items-center opacity-85 transition-opacity hover:opacity-100 md:h-10 md:w-10">
               {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </button>

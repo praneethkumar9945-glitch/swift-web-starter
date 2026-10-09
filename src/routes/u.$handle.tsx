@@ -1,3 +1,6 @@
+import { CreateContent } from "@/components/account/CreateContent";
+import { useAccount } from "@/lib/account";
+import { useCommunityContent, asExploreItem } from "@/lib/community-content";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Ban, Flag, Link2, ShieldOff, Bookmark, Clapperboard, Grid3x3, Images, MoreVertical, Plus, Share2, Ticket } from "lucide-react";
@@ -172,12 +175,14 @@ function ProfileEmptyState({ tab, isYou, onCreate }: { tab: Tab; isYou: boolean;
 
 function MobileProfile({ profile, isYou, posts, followerCount, followingCount, on, onList, desktop = false }: { profile: ExploreProfile; isYou: boolean; posts: ExploreItem[]; followerCount: number; followingCount: number; on: boolean; onList: (k: ListKind) => void; desktop?: boolean }) {
   const st = useExploreState();
+  const account = useAccount();
+  const cloudContent = useCommunityContent();
   const saved = useSaved();
   const [tab, setTab] = useState<Tab>("posts");
   const [stories, setStories] = useState<StoryEntry[]>([]);
   const [viewer, setViewer] = useState<number | null>(null);
   const [create, setCreate] = useState(false);
-  const [compose, setCompose] = useState<"Post" | "Reel" | "Story" | null>(null);
+
   const my = useMyContent();
   const mod = useMod();
   const [blockOpen, setBlockOpen] = useState(false);
@@ -212,10 +217,11 @@ function MobileProfile({ profile, isYou, posts, followerCount, followingCount, o
     ...(isYou && edits.username ? { username: edits.username } : null),
     ...(isYou && edits.fullName ? { fullName: edits.fullName } : null),
     bio: isYou ? edits.bio : undefined,
-    location: isYou ? edits.location : undefined,
+    location: isYou ? account.profile?.location ?? edits.location : undefined,
+    ...(isYou && account.profile ? { username: account.profile.username, fullName: account.profile.full_name, bio: account.profile.bio } : {}),
   } as ExploreProfile & { bio?: string; location?: string };
   const savedItems = exploreCatalog.filter((i) => saved.includes(`explore:${i.id}`));
-  const allPosts = isYou ? [...my.items, ...posts.filter((p) => !my.items.some((m) => m.id === p.id))] : posts;
+  const allPosts = isYou ? (cloudContent.data ?? []).filter(r => r.user_id === account.user?.id && ["post", "reel", "tweet"].includes(r.kind)).map(r => asExploreItem(r, true, account.profile?.full_name || "You")) : posts;
   const grid = tab === "posts" ? allPosts.filter((p) => p.kind !== "reel") : tab === "reels" ? allPosts.filter((p) => p.kind === "reel") : isYou ? savedItems : [];
   const tabs: { id: Tab; label: string; Icon: typeof Grid3x3 }[] = [
     { id: "posts", label: "Posts", Icon: Grid3x3 },
@@ -359,134 +365,9 @@ function MobileProfile({ profile, isYou, posts, followerCount, followingCount, o
       )}
       {viewer !== null && !blocked && profileStories.length > 0 && <StoryViewer entries={profileStories} start={viewer} onClose={() => setViewer(null)} />}
 
-      <ResponsiveOverlay open={create} onOpenChange={setCreate} title="Create">
-        <div className="p-4">
-          <h2 className="pb-3 text-center text-[15px] font-semibold">Create</h2>
-          {(["Post", "Reel", "Story"] as const).map((k) => (
-            <button
-              key={k}
-              onClick={() => {
-                setCreate(false);
-                setCompose(k);
-              }}
-              className="flex h-12 w-full items-center gap-3 rounded-lg px-3 text-[14px] font-semibold hover:bg-ink-soft"
-            >
-              {k === "Post" ? <Grid3x3 className="h-5 w-5" /> : k === "Reel" ? <Clapperboard className="h-5 w-5" /> : <Plus className="h-5 w-5" />} {k}
-            </button>
-          ))}
-        </div>
-      </ResponsiveOverlay>
-
-      {compose && <CreateComposer kind={compose} onClose={() => setCompose(null)} />}
+      <CreateContent open={create} onClose={() => setCreate(false)} />
 
     </div>
-  );
-}
-
-const MAX_MEDIA_BYTES = 8 * 1024 * 1024;
-
-function CreateComposer({ kind, onClose }: { kind: "Post" | "Reel" | "Story"; onClose: () => void }) {
-  const isReel = kind === "Reel";
-  const [media, setMedia] = useState<string[]>([]);
-  const [caption, setCaption] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const pick = async (files: FileList | null) => {
-    setError(null);
-    if (!files || files.length === 0) return;
-    const list = [...files];
-    if (list.some((f) => !(isReel ? f.type.startsWith("video/") : f.type.startsWith("image/")))) {
-      return setError(isReel ? "Please choose a video file." : "Please choose image files.");
-    }
-    if (list.some((f) => f.size > MAX_MEDIA_BYTES)) {
-      return setError("That file is too large — please pick one under 8 MB.");
-    }
-    setBusy(true);
-    try {
-      setMedia(await Promise.all(list.map(readFileAsDataUrl)));
-    } catch {
-      setError("Could not read that file on this device.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const share = () => {
-    const first = media[0];
-    if (!first) return setError(isReel ? "Choose a video first." : "Choose a photo first.");
-    if (kind === "Story") {
-      addMyStory(first);
-      toast("Story added to your profile");
-    } else {
-      const id = `my-${Date.now()}`;
-      const item: ExploreItem = {
-        id,
-        kind: isReel ? "reel" : "post",
-        tag: "Community",
-        img: isReel ? "" : first,
-        ...(isReel ? { video: first } : { images: media }),
-        creator: "You",
-        handle: YOU.id,
-        caption: caption.trim(),
-        likes: 0,
-        comments: [],
-      };
-      addMyItem(item);
-      toast(isReel ? "Reel shared" : "Post shared");
-    }
-    onClose();
-  };
-
-  return (
-    <ResponsiveOverlay open onOpenChange={(o) => !o && onClose()} title={`New ${kind.toLowerCase()}`}>
-      <div className="p-4">
-        <h2 className="pb-3 text-center text-[15px] font-semibold">New {kind.toLowerCase()}</h2>
-        <input
-          ref={fileRef}
-          type="file"
-          accept={isReel ? "video/*" : "image/*"}
-          multiple={kind === "Post"}
-          className="hidden"
-          onChange={(e) => {
-            const files = e.target.files;
-            e.target.value = "";
-            void pick(files);
-          }}
-        />
-        {media.length > 0 ? (
-          <div className="mb-3 overflow-hidden rounded-lg bg-ink-soft">
-            {isReel ? (
-              <video src={media[0]} controls muted playsInline className="mx-auto max-h-[40dvh] w-full object-contain" />
-            ) : (
-              <div className={cn("grid gap-0.5", media.length > 1 && "grid-cols-2")}>
-                {media.slice(0, 4).map((src, i) => (
-                  <img key={i} src={src} alt={`Selected ${i + 1}`} className="aspect-square w-full object-cover" />
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          <button type="button" onClick={() => fileRef.current?.click()} className="mb-3 grid h-40 w-full place-items-center rounded-lg border border-dashed border-ink-border text-[13px] font-semibold text-ink-muted hover:bg-ink-soft">
-            {busy ? "Reading file…" : isReel ? "Choose a video from your device" : "Choose a photo from your device"}
-          </button>
-        )}
-        {media.length > 0 && (
-          <button type="button" onClick={() => fileRef.current?.click()} className="mb-3 text-[13px] font-semibold text-primary hover:opacity-80">
-            {busy ? "Reading file…" : "Choose a different file"}
-          </button>
-        )}
-        {kind !== "Story" && (
-          <Textarea value={caption} onChange={(e) => setCaption(e.target.value)} maxLength={300} placeholder="Write a caption…" className="min-h-20 text-[14px]" />
-        )}
-        {error && <p role="alert" className="mt-2 text-[12px] text-primary">{error}</p>}
-        <button type="button" onClick={share} disabled={busy} className="mt-4 h-10 w-full rounded-lg bg-primary text-[13px] font-bold uppercase tracking-[0.14em] text-primary-foreground hover:opacity-90 disabled:opacity-50">
-          Share {kind}
-        </button>
-        <p className="mt-2 text-center text-[12px] text-ink-muted">Saved on this device and shown on your profile.</p>
-      </div>
-    </ResponsiveOverlay>
   );
 }
 

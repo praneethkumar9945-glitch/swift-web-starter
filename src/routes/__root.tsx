@@ -1,3 +1,4 @@
+import { AccountProvider } from "@/lib/account";
 import { AccountEditProfile } from "@/components/site/AccountEditProfile";
 import { AccountInformation } from "@/components/site/AccountInformation";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -126,6 +127,7 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <AccountProvider>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       {onExplore ? (
         <div className="max-md:hidden">
@@ -140,6 +142,7 @@ function RootComponent() {
       {!noFooter && <Footer />}
       <AccountEditProfile />
       <AccountInformation />
+    </AccountProvider>
     </QueryClientProvider>
   );
 }
