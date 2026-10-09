@@ -1,3 +1,10 @@
+import { CreateContent } from "@/components/account/CreateContent";
+import { UploadedEvents } from "@/components/account/UploadedEvents";
+import { useAccount, signOutAccount } from "@/lib/account";
+import { useCommunityContent, asExploreItem } from "@/lib/community-content";
+import { Button } from "@/components/ui/button";
+import { CalendarDays } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, Bookmark, Clapperboard, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Heart, Home, MessageCircle, MoreHorizontal, Plus, Repeat2, Search, Send, Volume2, VolumeX } from "lucide-react";
@@ -42,6 +49,10 @@ const TEXT_BG = [
 
 function ExplorePage() {
   const md = useMq("(min-width: 768px)");
+  const account = useAccount();
+  const content = useCommunityContent();
+  const queryClient = useQueryClient();
+  const [eventsOpen, setEventsOpen] = useState(false);
   const [entries, setEntries] = useState<FeedEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -211,7 +222,9 @@ function ExplorePage() {
   }, [leaveContent]);
   const syncReel = useCallback((id: string) => window.history.replaceState(window.history.state, "", `/explore?reel=${id}${fromProfile ? `&from=${encodeURIComponent(fromProfile)}` : ""}`), [fromProfile]);
 
-  const visible = entries.filter((e) => !hidden.includes(e.item.id));
+  const uploaded = (content.data ?? []).filter(r => ["post", "reel", "tweet"].includes(r.kind)).map(r => asExploreItem(r, r.user_id === account.user?.id, account.profile?.full_name || "Community"));
+  uploaded.forEach(item => { const index = exploreCatalog.findIndex(i => i.id === item.id); if (index < 0) exploreCatalog.unshift(item); else exploreCatalog[index] = item; });
+  const visible = [...uploaded.map(item => ({ item, key: `uploaded-${item.id}` })), ...entries.filter(e => !uploaded.some(i => i.id === e.item.id))].filter((e) => !hidden.includes(e.item.id));
   const reels = useMemo(() => {
     const ids = [...new Set(entries.filter((e) => e.item.kind === "reel").map((e) => e.item.id))];
     const rest = exploreCatalog.filter((i) => i.kind === "reel" && !ids.includes(i.id)).map((i) => i.id);
@@ -233,13 +246,16 @@ function ExplorePage() {
         <Link to="/" aria-label="←" className="grid h-11 w-11 place-items-center">
           <ArrowLeft className="h-6 w-6" />
         </Link>
-        <span className="font-display text-xl tracking-wide">
+        <span className="min-w-0 font-display text-lg">
           SAC <span className="text-primary">COMMUNITY</span>
         </span>
+        <div className="flex shrink-0 items-center">
+        <Button variant="ghost" size="icon" onClick={() => setEventsOpen(true)} aria-label="Events" title="Events"><CalendarDays /></Button>
         <button onClick={() => toast("No new notifications")} aria-label="Notifications" className="relative grid h-11 w-11 place-items-center">
           <Heart className="h-6 w-6" />
           <span className="absolute right-2.5 top-2.5 h-2.5 w-2.5 rounded-full bg-primary" />
         </button>
+        </div>
       </div>
 
       <div className="explore-grid pt-0 md:px-4 md:pt-[calc(var(--explore-header-h)+24px)]">
@@ -270,6 +286,10 @@ function ExplorePage() {
                 ))}
           </div>
 
+          <div className="flex items-center justify-between gap-3 px-3 py-3 md:px-0">
+            <Button variant="ghost" className="max-md:hidden" onClick={() => setEventsOpen(true)}><CalendarDays /> Events</Button>
+            {account.user ? <><Link to="/u/$handle" params={{ handle: "you" }} className="min-w-0 truncate text-sm">{account.profile?.full_name || "My profile"}</Link><Button variant="ghost" size="sm" onClick={async () => { await signOutAccount(queryClient); await router.navigate({to:"/login",replace:true}); }}>Log out</Button></> : <Button asChild size="sm"><Link to="/login">Log in</Link></Button>}
+          </div>
           {/* Unified feed */}
           <div className="border-t border-ink-border md:border-t-0">
             {visible.map((e) => (
@@ -326,7 +346,8 @@ function ExplorePage() {
       {!md && stories && stories.length > 0 && storyAt === null && <StoryRail stories={stories} seen={st.seenStories} onOpen={setStoryAt} />}
 
       {searchOpen && <ExploreSearch fullscreen onClose={() => setSearchOpen(false)} />}
-      {galleryOpen && <GalleryAdd onClose={() => setGalleryOpen(false)} />}
+      <CreateContent open={galleryOpen} onClose={() => setGalleryOpen(false)} />
+      <UploadedEvents open={eventsOpen} onClose={() => setEventsOpen(false)} />
       {storyAt !== null && stories && <StoryViewer entries={stories} start={storyAt} onClose={() => setStoryAt(null)} />}
       {reelId && reels.length > 0 && <ReelViewer reels={reels} startId={reelId} onClose={closeReel} onChange={syncReel} onMenu={setMenuItem} />}
       <PostViewModal item={postItem} onClose={() => { setPostItem(null); if (postParam) leaveContent(); }} onComment={setCommentItem} onMenu={setMenuItem} onOpenReel={setReelId} />
@@ -810,56 +831,3 @@ function StoryRail({ stories, seen, onOpen }: { stories: StoryEntry[]; seen: str
   );
 }
 
-function GalleryAdd({ onClose }: { onClose: () => void }) {
-  const [media, setMedia] = useState<string[]>([]);
-  const [caption, setCaption] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { fileRef.current?.click(); }, []);
-  const pick = async (files: FileList | null) => {
-    setError(null);
-    if (!files?.length) return;
-    const list = [...files];
-    if (list.some((f) => !f.type.startsWith("image/"))) return setError("Please choose photos.");
-    if (list.some((f) => f.size > 8 * 1024 * 1024)) return setError("Please pick photos under 8 MB.");
-    try { setMedia(await Promise.all(list.map(readFileAsDataUrl))); } catch { setError("Could not read that photo."); }
-  };
-  const asStory = () => {
-    media.forEach((m) => addMyStory(m));
-    toast("Added to your pics");
-    onClose();
-  };
-  const asPost = () => {
-    const first = media[0];
-    if (!first) return;
-    addMyItem({ id: `my-${Date.now()}`, kind: "post", tag: "Community", img: first, images: media, creator: "You", handle: YOU.id, caption: caption.trim(), likes: 0, comments: [] });
-    toast("Post shared");
-    onClose();
-  };
-  return (
-    <ResponsiveOverlay open onOpenChange={(o) => !o && onClose()} title="Add from gallery">
-      <div className="p-4">
-        <h2 className="pb-3 text-center text-[15px] font-semibold">Add from gallery</h2>
-        <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { const f = e.target.files; e.target.value = ""; void pick(f); }} />
-        {media.length > 0 ? (
-          <div className="no-scrollbar mb-3 flex snap-x gap-2 overflow-x-auto">
-            {media.map((m, i) => <img key={i} src={m} alt="" className="h-56 w-auto shrink-0 snap-center rounded-lg object-cover" />)}
-          </div>
-        ) : null}
-        <button onClick={() => fileRef.current?.click()} className="mb-3 w-full rounded-lg border border-ink-border py-2.5 text-[14px] font-semibold">
-          {media.length ? "Choose different photos" : "Open gallery"}
-        </button>
-        {error && <p className="mb-3 text-center text-[13px] text-destructive">{error}</p>}
-        {media.length > 0 && (
-          <>
-            <textarea value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="Write a caption (for post)…" rows={2} className="mb-3 w-full resize-none rounded-lg border border-ink-border bg-transparent p-2.5 text-[14px] outline-none" />
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={asStory} className="rounded-lg border border-ink-border py-2.5 text-[14px] font-semibold">Add to pics</button>
-              <button onClick={asPost} className="rounded-lg bg-primary py-2.5 text-[14px] font-semibold text-primary-foreground">Share as post</button>
-            </div>
-          </>
-        )}
-      </div>
-    </ResponsiveOverlay>
-  );
-}
